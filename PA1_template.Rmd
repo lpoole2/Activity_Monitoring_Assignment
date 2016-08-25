@@ -1,0 +1,219 @@
+---
+title: "Activity Monitoring Analysis"
+---
+
+##Loading and preprocessing the data
+
+The first step is to find the file online and load it to further analyze.
+
+```{r, echo=TRUE}
+# check if a data folder exists
+if (!file.exists("data")) {dir.create("data")}
+
+# file URL and destination file
+fileUrl <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip"
+destfile <- "./data/activity.zip"
+
+# download the file and note the time
+download.file(fileUrl, destfile = destfile)
+dateDownloaded <- date()
+
+# Read out the containing csv file
+data <- read.csv(unz("./data/activity.zip", "activity.csv"))
+```
+
+##What is mean total number of steps taken per day?
+
+Next, the data is divided up into date, steps, and interval.
+
+```{r,echo=TRUE}
+# assign variables to the columns
+steps <- data$steps
+date <- data$date
+interval <- data$interval
+
+# filter to isolate non-NA values
+filter <- !is.na(steps)
+
+# apply the steps filter to the date vector
+filter_steps <- steps[filter]
+filter_date <- date[filter]
+```
+
+Another vector was established to determine the total steps each day.
+
+```{r,echo=TRUE}
+# create a factor vector for the non-NA days
+days_factor <- factor(filter_date)
+
+# get the total number of steps for each day
+total_steps <- tapply(filter_steps, days_factor, FUN = sum)
+
+# plot a histogram of the total number of steps taken each day
+hist(total_steps, breaks = 10, 
+          xlab = "Total number of steps per day", 
+          main = "Distribution of total steps per day", 
+          col = "red", 
+          type = "count")
+```
+
+The mean and median were also calculated.
+
+```{r,echo=TRUE}
+original_mean <- mean(total_steps)
+```
+
+##[1] 10766
+
+```{r,echo=TRUE}
+original_median <- median(total_steps)
+```
+
+##[1] 10765
+
+## What is the average daily activity pattern?
+
+To determine the average daily acvitivy pattern, a vector was established to calculate the average steps.
+
+```{r,echo=TRUE}
+# create a factor vector for the time intervals
+interval_factor <- factor(interval)
+levels <- nlevels(interval_factor)
+interval_factor <- factor(interval)[1:levels]
+
+# calculate the average number of steps for each 5 minute period
+average_steps <- tapply(steps, factor(interval), FUN = mean, na.rm = TRUE)
+average_steps <- sapply(average_steps, simplify = array, round, 2)
+
+scales=list( x=list(at = seq(0, 2400, 200)))     
+   
+# plot the time series
+plot(as.numeric(average_steps) ~ interval[1:288], 
+       type = "l", 
+       xlab = "Time interval",
+       ylab = "Average steps", 
+       main = "Time series - average steps vs time interval", 
+       scales = scales)
+```
+
+Using average steps and time, a data fram was created to sort steps and time.
+
+```{r,echo=TRUE}
+# create a data frame of average steps and time interval
+df_steps_interval <- data.frame(interval_factor, average_steps)
+
+# sort df to get the row with the maximum amount of average steps
+df_steps_interval <- df_steps_interval[order(df_steps_interval$average_steps, 
+                                             decreasing = TRUE),]
+
+# the first row contains the relevant time interval
+time_interval_max <- df_steps_interval$interval_factor[1]
+
+# convert the factor to a character and then to numeric
+time_interval_max <- as.numeric(as.character(time_interval_max))
+```
+
+##[1] 835
+
+## Imputing missing values
+
+The number of missing values was determine by the following code:
+
+```{r,echo=TRUE}
+# number of NA values in original dataset
+length(steps[is.na(steps)])
+```
+
+## [1] 2304
+
+Then those values were assumed new ones built on the analogous 5 minute interval for the average steps.
+
+```{r,echo=TRUE}
+# take a copy of the original steps vector
+new_steps <- steps
+
+# fill in each NA value by taking the average for that time interval
+for (i in which(sapply(new_steps, is.na))) {
+  
+  # set the value to the equivalent value in the average vector
+  if (i <= 288){
+    new_steps[i] <- average_steps[i]
+  } 
+  
+  # wrap around 288 (avg time only has 24 hours of data) and add one because 
+  # R is non-zero index
+  else{
+    j <- i%%288 + 1
+    new_steps[i] <- average_steps[j]
+  }
+}
+```
+
+The sum was then determined and a histogram was created to display the results.
+
+```{r,echo=TRUE}
+# create a factor vector for all of the days
+new_days_factor <- factor(new_steps)
+
+# get the total number of steps for each day
+new_total_steps <- tapply(new_steps, new_days_factor, FUN = sum)
+
+# plot a histogram of the total number of steps taken each day
+hist(new_total_steps, breaks = 10, 
+          xlab = "Total number of steps per day", 
+          main = "Total steps per day after imputted values", 
+          col = "red",
+          type = "count")
+```
+
+The mean and median were then calculated
+
+```{r,echo=TRUE}
+new_mean <- mean(new_total_steps)
+```
+
+## [1] 755.7
+
+```{r,echo=TRUE}
+new_median <- median(new_total_steps)
+```
+
+## [1] 612
+
+## Are there differences in activity patterns between weekdays and weekends?
+
+Build a function to establish whether the date is, in fact, a weekday.
+
+```{r,echo=TRUE}
+week_day <- function(date_val) {
+    wd <- weekdays(as.Date(date_val, '%Y-%m-%d'))
+    if  (!(wd == 'Saturday' || wd == 'Sunday')) {
+        x <- 'Weekday'
+    } else {
+        x <- 'Weekend'
+    }
+    x
+}
+```
+
+Then, the function is used to determine a new variable.
+
+```{r, echo=TRUE}
+# Apply the week_day function and add a new column to activity dataset
+data$day_type <- as.factor(sapply(data$date, week_day))
+
+#load the ggplot library
+library(ggplot2)
+
+# Create the aggregated data frame by intervals and day_type
+steps_per_day_impute <- aggregate(steps ~ interval+day_type, data, mean)
+
+# Create the plot
+plt <- ggplot(steps_per_day_impute, aes(interval, steps)) +
+    geom_line(stat = "identity", aes(colour = day_type)) +
+    theme_gray() +
+    facet_grid(day_type ~ ., scales="fixed", space="fixed") +
+    labs(x="Time", y=expression("Steps")) +
+    ggtitle("Number of steps vs. Time interval") + theme(legend.position="none")
+print(plt)
+```
